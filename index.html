@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recruitment Task</title>
+    <style>
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      h1 {
+        text-align: center;
+      }
+      .results {
+        display: none;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 15px;
+      }
+      .form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        flex-direction: column;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .messages {
+        padding: 10px 0;
+      }
+      .pagination {
+        display: flex;
+        justify-content: center;
+        gap: 3px;
+        padding: 15px 0;
+      }
+      .loading {
+        display: none;
+        padding: 10px 0;
+      }
+      .results {
+        border-collapse: collapse;
+        margin-top: 25px;
+      }
+
+      .results td,
+      .results th {
+        border: 1px solid #ddd;
+        padding: 8px;
+      }
+
+      .results tr:nth-child(even) {
+        background-color: #f2f2f2;
+      }
+
+      .results th {
+        padding-top: 12px;
+        padding-bottom: 12px;
+        text-align: left;
+        background-color: #0452aa;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Movies searching engine</h1>
+    </header>
+    <main>
+      <div class="container">
+        <form action="" id="movieSearchForm" class="form">
+          <label for="movieType">
+            Select Type:
+            <select name="" id="movieType">
+              <option value="movie">Movie</option>
+              <option value="series">Series</option>
+              <option value="episode">Episode</option>
+            </select>
+          </label>
+          <label for="movieTitle">
+            Enter Title:
+            <input type="text" id="movieTitle" placeholder="e.g., Avengers" />
+          </label>
+
+          <button type="submit">Search</button>
+        </form>
+        <div id="loading" class="loading">Loading...</div>
+        <div id="messages" class="messages"></div>
+
+        <table id="results" class="results">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Year</th>
+              <th>Country</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </main>
+    <footer>
+      <div class="pagination" id="pagination"></div>
+    </footer>
+    <script>
+      class MovieSearch {
+        /**
+         * Constructor to initialize the MovieSearch class
+         * @param {string} apiKey - The API key for OMDB API
+         * @param {number} maxResultsPerPage - The maximum number of results to fetch (default: 30)
+         */
+        constructor(apiKey, maxResultsPerPage = 30) {
+          this.apiKey = apiKey;
+          this.form = document.querySelector("#movieSearchForm");
+          this.sendButton = this.form.querySelector('button[type="submit"]');
+          this.results = document.querySelector("#results");
+          this.resultsBody = results.querySelector("tbody");
+          this.messages = document.querySelector("#messages");
+          this.movieType = this.form.querySelector("#movieType");
+          this.movieTitle = this.form.querySelector("#movieTitle");
+          this.maxResultsPerPage = maxResultsPerPage; // Results to show per page
+          this.currentPage = 1; // Track the current page
+          this.fullMovieList = []; // Store full list of movies here
+          this.movieCache = {}; // Cache for storing detailed movie data
+          this.totalPages = 1; // Track total pages based on results
+
+          this.loading = document.querySelector("#loading");
+          this.fireSearchEvent();
+        }
+
+        /**
+         * Adds an event listener to the search button, triggering a search when clicked.
+         */
+        fireSearchEvent() {
+          this.resultsVisibility(0);
+          this.sendButton.addEventListener("click", (e) => {
+            e.preventDefault();
+            this.handleSearchEvent();
+          });
+        }
+
+        /**
+         * Handles the search event by validating the input and triggering the movie search.
+         */
+        handleSearchEvent() {
+          const title = this.movieTitle.value;
+          const type = this.movieType.value;
+
+          if (title === "") {
+            this.showMessages("Please enter a title");
+            return;
+          }
+
+          this.clearMessages();
+          this.resultsBody.innerHTML = "";
+          this.currentPage = 1; // Reset to first page
+          this.fullMovieList = []; // Reset the list
+          this.movieCache = {}; // Reset the cache
+          this.fetchMovies(title, type);
+        }
+
+        /**
+         * Fetches movie data from the OMDB API based on the title and type.
+         * Handles pagination by fetching multiple pages if necessary.
+         * @param {string} title - The movie title to search for.
+         * @param {string} type - The type of production (movie, series, or episode).
+         */
+        async fetchMovies(title, type) {
+          this.showLoading();
+          let allMovies = [];
+          let page = 1;
+          let totalResults = 0;
+
+          // Loop to fetch all movies from multiple pages
+          while (true) {
+            const url = `https://www.omdbapi.com/?apikey=${this.apiKey}&s=${title}&type=${type}&page=${page}`;
+            const response = await fetch(url);
+            const result = await response.json();
+
+            if (result.Response === "True") {
+              allMovies = allMovies.concat(result.Search); // Append the current page results to the movie list
+              totalResults = parseInt(result.totalResults, 10); // Get the total number of results from the API
+              page++;
+
+              // Stop the loop when we have collected all results
+              if (allMovies.length >= totalResults) break;
+            } else {
+              this.showMessages(result.Error);
+              break;
+            }
+          }
+
+          this.fullMovieList = allMovies; // Store all results
+          this.totalPages = Math.ceil(
+            this.fullMovieList.length / this.maxResultsPerPage
+          );
+          this.hideLoading();
+          this.paginateResults();
+          this.updatePagination();
+        }
+
+        /**
+         * Paginates the movie list results based on the current page and max results per page.
+         * Fetches and displays the results for the current page.
+         */
+        paginateResults() {
+          const startIndex = (this.currentPage - 1) * this.maxResultsPerPage;
+          const endIndex = startIndex + this.maxResultsPerPage;
+          const paginatedMovies = this.fullMovieList.slice(
+            startIndex,
+            endIndex
+          );
+          this.fetchMovieDetails(paginatedMovies);
+        }
+
+        /**
+         * Fetches detailed movie information such as the country for each movie in the search results.
+         * Caches the data to prevent redundant API requests.
+         * @param {Array} movies - The array of movie objects fetched from the search query.
+         */
+        fetchMovieDetails(movies) {
+          const moviePromises = movies.map((movie) => {
+            if (this.movieCache[movie.imdbID]) {
+              // If details are already cached, return them from cache
+              return Promise.resolve(this.movieCache[movie.imdbID]);
+            } else {
+              // Fetch details from API if not in cache
+              return fetch(
+                `https://www.omdbapi.com/?apikey=${this.apiKey}&i=${movie.imdbID}`
+              )
+                .then((response) => response.json())
+                .then((details) => {
+                  const movieDetails = {
+                    title: details.Title,
+                    year: details.Year,
+                    country: details.Country || "N/A",
+                    type: details.Type,
+                  };
+                  // Cache the details for future use
+                  this.movieCache[movie.imdbID] = movieDetails;
+                  return movieDetails;
+                });
+            }
+          });
+
+          // After all promises resolve, show the results
+          Promise.all(moviePromises)
+            .then((movieDetails) => {
+              this.showResults(movieDetails);
+            })
+            .catch((error) => {
+              this.showMessages(
+                "An error occurred while fetching detailed data."
+              );
+              console.error(error);
+            });
+        }
+
+        /**
+         * Displays the search results in a table format.
+         * @param {Array} data - The array of movie details to display.
+         */
+        showResults(data) {
+          this.resultsVisibility(1);
+          this.resultsBody.innerHTML = ""; // Reset results before adding new ones
+          let html = "";
+          data.forEach((data) => {
+            html += `
+            <tr>
+                <td>${data.title}</td>
+                <td>${data.year}</td>
+                <td>${data.country}</td>
+                <td>${data.type}</td>
+                </tr>
+            `;
+          });
+
+          this.resultsBody.innerHTML = html;
+        }
+
+        /**
+         * Updates the pagination controls based on the current page and total pages.
+         */
+        updatePagination() {
+          const pagination = document.getElementById("pagination");
+          pagination.innerHTML = "";
+
+          const startPage = Math.max(1, this.currentPage - 3);
+          const endPage = Math.min(this.totalPages, this.currentPage + 3);
+
+          if (this.currentPage > 1) {
+            const prevButton = document.createElement("button");
+            prevButton.innerText = "Previous";
+            prevButton.addEventListener("click", () => {
+              this.currentPage--;
+              this.paginateResults();
+              this.updatePagination();
+            });
+            pagination.appendChild(prevButton);
+          }
+
+          for (let page = startPage; page <= endPage; page++) {
+            const button = document.createElement("button");
+            button.innerText = page;
+            button.disabled = page === this.currentPage;
+            button.addEventListener("click", () => {
+              this.currentPage = page;
+              this.paginateResults();
+              this.updatePagination();
+            });
+            pagination.appendChild(button);
+          }
+
+          if (this.currentPage < this.totalPages) {
+            const nextButton = document.createElement("button");
+            nextButton.innerText = "Next";
+            nextButton.addEventListener("click", () => {
+              this.currentPage++;
+              this.paginateResults();
+              this.updatePagination();
+            });
+            pagination.appendChild(nextButton);
+          }
+        }
+
+        /**
+         * Shows the loading message while data is being fetched.
+         */
+        showLoading() {
+          this.loading.style.display = "block";
+        }
+
+        /**
+         * Hides the loading message after data fetching is complete.
+         */
+        hideLoading() {
+          this.loading.style.display = "none";
+        }
+
+        /**
+         * Displays a message to the user.
+         * @param {string} message - The message to display.
+         */
+        showMessages(message) {
+          this.messages.innerHTML = message;
+        }
+
+        /**
+         * Clears any existing messages.
+         */
+        clearMessages() {
+          this.messages.innerHTML = "";
+        }
+
+        /**
+         * Toggles the visibility of the search results table.
+         * @param {number} status - 1 to show, 0 to hide.
+         */
+        resultsVisibility(status = 1) {
+          status
+            ? (this.results.style.display = "block")
+            : (this.results.style.display = "none");
+        }
+      }
+
+      // Initialize the application with an API key and set max results
+      const apiKey = "b39ef961";
+      const app = new MovieSearch(apiKey, 50);
+    </script>
+  </body>
+</html>
